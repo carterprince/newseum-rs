@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Newseum
+Comment=Read your RSS and Atom feeds
+Exec=newseum
+Icon=io.github.carterprince.Newseum
+Terminal=false
+Categories=Network;News;Feed;GTK;
+Keywords=rss;atom;feed;news;reader;
+StartupNotify=true
+DBusActivatable=false
