@@ -1,6 +1,6 @@
 //! Feed list persistence (`~/.config/newseum/feeds.csv`) and network fetching.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -69,11 +69,16 @@ pub fn load_feeds() -> Result<Vec<Feed>, String> {
 }
 
 pub fn save_feeds(feeds: &[Feed]) -> Result<(), String> {
-    let path = config_path();
+    write_feeds(&config_path(), feeds)
+}
+
+fn write_feeds(path: &Path, feeds: &[Feed]) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("Could not create {}: {e}", dir.display()))?;
     }
     // Write to a temp file and rename so a crash never leaves a half-written list.
+    // Rename onto the real file so that a symlinked feeds.csv stays a symlink.
+    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let tmp = path.with_extension("csv.tmp");
     {
         let mut w = csv::WriterBuilder::new()
@@ -463,6 +468,24 @@ mod tests {
         assert_eq!(channel_id_in_page(&format!(r#"x"externalId":"{ID}",y"#)).as_deref(), Some(ID));
         assert_eq!(channel_id_in_page(&format!("feeds/videos.xml?channel_id={ID}\"")).as_deref(), Some(ID));
         assert_eq!(channel_id_in_page(r#""externalId":"nope""#), None);
+    }
+
+    #[test]
+    fn saving_keeps_a_symlinked_list_a_symlink() {
+        let dir = std::env::temp_dir().join(format!("newseum-test-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("real")).unwrap();
+        let (real, link) = (dir.join("real/feeds.csv"), dir.join("feeds.csv"));
+        std::fs::write(&real, "Old,https://example.com/old\n").unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let feeds = [super::Feed { name: "New".into(), url: "https://example.com/new".into() }];
+        super::write_feeds(&link, &feeds).unwrap();
+
+        let is_link = std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink();
+        let contents = std::fs::read_to_string(&real).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(is_link);
+        assert_eq!(contents, "New,https://example.com/new\n");
     }
 
     /// `cargo test resolves_youtube -- --ignored --nocapture`
